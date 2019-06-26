@@ -1,0 +1,528 @@
+PlatformRegistry
+
+package com.rbsgrp.journeymanager;
+
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * @author KumaKbz
+ */
+public class PlatformRegistry {
+
+    private static final PlatformRegistry INSTANCE = new PlatformRegistry();
+
+    private ThreadLocal<Map<String, Object>> registry;
+
+    /**
+     * <p>
+     * initialise the thread local registry
+     * </p>
+     */
+    private PlatformRegistry() {
+        registry = new ThreadLocal<Map<String, Object>>() {
+            @Override
+            protected Map<String, Object> initialValue() {
+                return new HashMap<>();
+            }
+        };
+    }
+
+    public static PlatformRegistry getInstance() {
+        return INSTANCE;
+    }
+
+    public Object getValue(String name) {
+        return INSTANCE.registry.get().get(name);
+    }
+
+    public void putValue(String name, Object object) {
+        INSTANCE.registry.get().put(name, object);
+    }
+
+    public void removeValue(String name) {
+        INSTANCE.registry.get().remove(name);
+    }
+
+    public void clear() {
+        INSTANCE.registry.get().clear();
+    }
+
+}
+
+======================================================================
+AppConfiguration
+
+package com.rbsgrp.journeymanager;
+
+import com.rbs.mybank.digital.platform.common.model.cookie.marshaller.CookieMarshaller;
+import com.rbs.mybank.digital.platform.common.model.cookie.marshaller.CustomerCookieMarshaller;
+import com.rbsgrp.camel.platform.restclient.RestTemplateFactory;
+import com.rbsgrp.camel.platform.restclient.RestTemplateFactoryConfig;
+import org.springframework.beans.factory.InitializingBean;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.PropertySource;
+import org.springframework.test.context.ContextConfiguration;
+import org.springframework.web.client.RestTemplate;
+
+import java.io.IOException;
+
+/**
+ * @author kumakbz
+ */
+@ContextConfiguration
+public abstract class AppConfiguration {
+
+    @Configuration
+    @ComponentScan({"com.rbsgrp.journeymanagery", "com.rbsgrp.camel.platform"})
+    @PropertySource(value = "classpath:environment.properties")
+    static class Config implements InitializingBean {
+
+        @Bean
+        public RestTemplateFactory restTemplateFactory() {
+            return new RestTemplateFactory();
+        }
+
+        @Bean(name = "routingRestTemplate")
+        public RestTemplate routingRestTemplate(RestTemplateFactory restTemplateFactory) throws IOException {
+            return restTemplateFactory.getRestTemplate();
+        }
+
+        @Bean
+        public RestTemplateFactoryConfig restTemplateFactoryConfig() {
+            return new RestTemplateFactoryConfig();
+        }
+
+        @Override
+        public void afterPropertiesSet() throws Exception {
+
+        }
+
+        @Bean(name = {"cookieMarshaller"})
+        public CookieMarshaller customerCookieMarshaller() {
+            return new CustomerCookieMarshaller();
+        }
+    }
+}
+
+
+==========================================================
+BaseSteps
+
+package com.rbsgrp.journeymanager.steps;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.collect.ImmutableMap;
+import com.rbsgrp.camel.platform.exception.PlatformSystemException;
+import com.rbsgrp.camel.platform.restclient.PojoMapper;
+import com.rbsgrp.camel.platform.util.CommonUtil;
+import com.rbsgrp.journeymanager.AppConfiguration;
+import com.rbsgrp.journeymanager.PlatformRegistry;
+import cucumber.api.Scenario;
+import org.apache.commons.lang.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.*;
+import org.springframework.web.client.RestTemplate;
+
+import javax.annotation.PostConstruct;
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.Charset;
+import java.nio.file.Files;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Properties;
+
+/**
+ * @author kumakbz
+ */
+public class BaseSteps extends AppConfiguration {
+
+    private static final String REQUEST = "requests/";
+
+    private static String env;
+    private static String auth;
+    private static final Properties properties = new Properties();
+
+    String channelHost;
+    String appMgmtServiceEndPoint;
+
+    static {
+        env = System.getProperty("env");
+        if (StringUtils.isEmpty(env) || CommonUtil.isNull(env)) {
+            env = "dev";
+        }
+        System.out.println("##################-- ENV:" + env + "--##################");
+        auth = System.getProperty("auth");
+        System.out.println("##################-- AUTH:" + auth + "--##################");
+        System.out.println();
+        try {
+            properties.load(BaseSteps.class.getClassLoader().getResourceAsStream("environment.properties"));
+        } catch (IOException e) {
+            throw new RuntimeException("Error during env properties : " + e.getMessage());
+        }
+    }
+
+    @Autowired
+    @Qualifier("routingRestTemplate")
+    private RestTemplate restTemplate;
+
+    private Scenario scenario;
+
+    String urlToTest;
+
+    @PostConstruct
+    public void resetChannelHost() {
+
+        channelHost = properties.getProperty(env + ".base.path");
+        appMgmtServiceEndPoint =
+                properties.getProperty(env + ".domain.applicationManagement.service.endpoint");
+    }
+
+    ResponseEntity executeGet(String endPoint, HttpHeaders httpHeaders, Class<String> clazz, String route) {
+        ResponseEntity responseEntity = null;
+        try {
+            responseEntity = restTemplate.exchange(endPoint, HttpMethod.GET, buildGetBody(httpHeaders), clazz);
+            PlatformRegistry.getInstance().putValue(route, responseEntity);
+            System.out.println("##################--Response Start for endpoint: " + endPoint + "--##################");
+            System.out.println(CommonUtil.prettyJson(responseEntity.getBody()));
+            System.out.println("##################--Response End--##################");
+        } catch (Exception e) {
+            throw new RuntimeException("Error during REST call for endpoint : " + endPoint);
+        }
+        return responseEntity;
+    }
+
+    <T> ResponseEntity executePost(T request, String endPoint, HttpHeaders httpHeaders, Class clazz, String route) {
+        ResponseEntity responseEntity = null;
+        try {
+            System.out.println("##################--Request Start for Endpoint: " + endPoint + "--##################");
+            System.out.println(CommonUtil.prettyJson(request));
+            System.out.println("##################--Request End--##################");
+            responseEntity = restTemplate.exchange(endPoint, HttpMethod.POST, buildPostBody(request, httpHeaders), clazz);
+            PlatformRegistry.getInstance().putValue(route, responseEntity);
+            System.out.println("##################--Response Start for endpoint: " + endPoint + "--##################");
+            System.out.println(CommonUtil.prettyJson(responseEntity.getBody()));
+            System.out.println("##################--Response End--##################");
+        } catch (Exception e) {
+            throw new RuntimeException("Error during REST call for endpoint : " + endPoint);
+        }
+        return responseEntity;
+    }
+
+    ResponseEntity executeDelete(String endPoint, HttpHeaders httpHeaders, Class<String> clazz, String route) {
+        ResponseEntity responseEntity = null;
+        try {
+            responseEntity = restTemplate.exchange(endPoint, HttpMethod.DELETE, buildGetBody(httpHeaders), clazz);
+            PlatformRegistry.getInstance().putValue(route, responseEntity);
+            System.out.println("##################--Response Start for endpoint: " + endPoint + "--##################");
+            System.out.println(CommonUtil.prettyJson(responseEntity.getBody()));
+            System.out.println("##################--Response End--##################");
+        } catch (Exception e) {
+            throw new RuntimeException("Error during REST call for endpoint : " + endPoint);
+        }
+        return responseEntity;
+    }
+
+    private HttpEntity buildGetBody(HttpHeaders httpHeaders) {
+        return new HttpEntity(httpHeaders);
+    }
+
+    private <T> HttpEntity buildPostBody(T request, HttpHeaders httpHeaders) {
+        return new HttpEntity(request, httpHeaders);
+    }
+
+    Map<String, String> buildCookieHeaders(ResponseEntity responseEntity, String iam_subject) {
+        final HttpHeaders headers = responseEntity.getHeaders();
+        final String cookie = headers.get("Set-Cookie").stream().findFirst().get();
+        System.out.println("##################-- Cookie:" + cookie + "--##################");
+        return ImmutableMap.of(
+                "Cookie", cookie,
+                "iam_subject", iam_subject);
+    }
+
+    HttpHeaders buildHeaders(Map<String, String> headersValues) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON_UTF8);
+        headersValues.forEach(headers::set);
+        if (StringUtils.isNotEmpty(auth) || CommonUtil.isNotNull(auth)) {
+            headers.set("Authorization", "Bearer " + auth);
+        }
+        return headers;
+    }
+
+    @SuppressWarnings("unchecked")
+    public <T> T getValue(String name) {
+        return (T) PlatformRegistry.getInstance().getValue(name);
+    }
+
+    public void putValue(String name, Object object) {
+        PlatformRegistry.getInstance().putValue(name, object);
+    }
+
+    public void putMapValue(String name, String key, Object object) {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> mapValue = (Map<String, Object>) PlatformRegistry.getInstance().getValue(name);
+        if (mapValue == null) {
+            mapValue = new LinkedHashMap<>();
+            PlatformRegistry.getInstance().putValue(name, mapValue);
+        }
+        mapValue.put(validateKey(key, mapValue), object);
+    }
+
+    private String validateKey(String key, Map<String, Object> mapValue) {
+        String newKey = key;
+        for (int i = 0; i < mapValue.size(); i++) {
+            if (mapValue.containsKey(newKey)) {
+                newKey = newKey + "+1";
+            }
+        }
+        return newKey;
+    }
+
+    public void removeValue(String name) {
+        PlatformRegistry.getInstance().removeValue(name);
+    }
+
+    public void clear() {
+        PlatformRegistry.getInstance().clear();
+    }
+
+    @SuppressWarnings("unchecked")
+    public <T> Object loadRequestData(String objectName, String basePath) {
+        Class<T> clazz;
+        Object instance;
+        try {
+            clazz = (Class<T>) Class.forName(basePath + objectName);
+            String path = ClassLoader.getSystemResource(
+                    REQUEST + objectName + ".json").getPath();
+
+            String request = new String(Files.readAllBytes(new File(path).toPath()), Charset.defaultCharset());
+            instance = new ObjectMapper().readValue(request, clazz);
+        } catch (ClassNotFoundException | IOException e) {
+            throw new PlatformSystemException(String.format("Failed to load file for api: %s and exception: %s", objectName, e));
+        }
+        return instance;
+    }
+
+    <T> T mapToObject(String response, Class<T> type) throws IOException {
+        return new PojoMapper().fromJson(response, type);
+    }
+
+    <T> ResponseEntity<T> mapToResponseEntity(ResponseEntity<String> responseEntity, Class<T> type) throws IOException {
+        return new ResponseEntity<>(mapToObject(responseEntity.getBody(), type), responseEntity.getStatusCode());
+    }
+
+    @SuppressWarnings("unchecked")
+    public <T> Object loadRequestData(Class objectName, String fileName, String basePath) {
+        Object instance;
+        try {
+            String path = REQUEST + fileName;
+            instance = new PojoMapper().fromJsonFile(path, objectName);
+        } catch (IOException e) {
+            throw new PlatformSystemException(String.format("Failed to load file for api: %s and exception: %s", objectName, e));
+        }
+        return instance;
+    }
+
+}
+
+======================================================
+
+environment.properties
+
+domain.client.certificate.file=/keytool_lbcore-bbc-nwb-dev-2.apps.rbsgrp.mde.jks
+domain.client.certificate.password=1bc0reBbc
+domain.client.certificate.type=JKS
+domain.client.totalMaxConnectionPoolSize=200
+domain.client.maxConnectionsPerRoute=50
+domain.client.maxConnectionsPerRouteForHost=50
+domain.client.validateCertificateHostname=false
+
+dev.base.path=https://lbz5-bbc-nwb-dev-2.apps.rbsgrp.mde
+qa.base.path=https://lbz5-bbc-nwb-qa-2.apps.rbsgrp.mde
+nft.base.path=https://lbz5.bbc.nwb-nft-1.apps.rbsgrp.mde
+local_routing.base.path=https://localhost:51205
+local_tier3.base.path=https://localhost:51105
+
+channel.routing.endpoint= /bbconnect/api/routingjourneygateway/v1/login
+======================================================
+
+pom.xml
+
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.rbs.zambezi.maven</groupId>
+        <artifactId>zambezi-java-parent-pom</artifactId>
+        <version>4.0.3</version>
+    </parent>
+    <groupId>com.rbs.lending</groupId>
+    <artifactId>lnd-ms-tier3-journey-manager-test</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <name>${project.artifactId}</name>
+
+    <properties>
+        <jdk.version>1.8</jdk.version>
+        <lending.external-modules-dependency-management.version>4.4.1
+        </lending.external-modules-dependency-management.version>
+        <cucumber.version>1.2.5</cucumber.version>
+        <lnd-camel-platform-common.version>0.0.20</lnd-camel-platform-common.version>
+        <lnd-domain-service-common.version>0.0.264</lnd-domain-service-common.version>
+        <lnd-tier3-customer-common.version>0.0.94</lnd-tier3-customer-common.version>
+        <lnd-journey-determination-common.version>0.0.34</lnd-journey-determination-common.version>
+
+        <!-- used to select the artifactory location where artifacts are published -->
+        <artifactory.releases.repo.name>lending-libs-releases-local</artifactory.releases.repo.name>
+        <artifactory.snapshots.repo.name>lending-libs-snapshots-local</artifactory.snapshots.repo.name>
+
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>com.rbs.agilemarkets.digital-platform.lending</groupId>
+                <artifactId>lending-external-modules-dependency-management-pom</artifactId>
+                <version>${lending.external-modules-dependency-management.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <dependency>
+            <groupId>info.cukes</groupId>
+            <artifactId>cucumber-junit</artifactId>
+            <version>1.2.5</version>
+        </dependency>
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>4.12</version>
+        </dependency>
+        <dependency>
+            <groupId>org.hamcrest</groupId>
+            <artifactId>hamcrest-all</artifactId>
+            <version>1.3</version>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-all</artifactId>
+            <version>1.10.19</version>
+        </dependency>
+        <dependency>
+            <groupId>info.cukes</groupId>
+            <artifactId>cucumber-java8</artifactId>
+            <version>1.2.5</version>
+        </dependency>
+        <dependency>
+            <groupId>com.rbs.lending</groupId>
+            <artifactId>lnd-camel-platform</artifactId>
+            <version>${lnd-camel-platform-common.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.rbs.agilemarkets.digital-platform.lending</groupId>
+            <artifactId>lnd-domain-service-common</artifactId>
+            <version>${lnd-domain-service-common.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.rbs.agilemarkets.digital-platform.lending</groupId>
+            <artifactId>lnd-tier3-customer-common</artifactId>
+            <version>${lnd-tier3-customer-common.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.rbs.agilemarkets.digital-platform.lending</groupId>
+            <artifactId>lnd-journey-determination-common</artifactId>
+            <version>${lnd-journey-determination-common.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>info.cukes</groupId>
+            <artifactId>cucumber-spring</artifactId>
+            <version>1.2.5</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-context</artifactId>
+            <version>4.3.8.RELEASE</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-test</artifactId>
+            <version>4.3.8.RELEASE</version>
+        </dependency>
+    </dependencies>
+
+    <profiles>
+        <profile>
+        <id>qa</id>
+        <properties>
+            <cucumber.options>--tags @qa</cucumber.options>
+        </properties>
+
+        <build>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>2.18.1</version>
+                    <configuration>
+                        <systemPropertyVariables>
+                            <cucumber.options>${cucumber.options}</cucumber.options>
+                        </systemPropertyVariables>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </build>
+        </profile>
+        <profile>
+            <id>nft</id>
+            <properties>
+                <cucumber.options>--tags @nft</cucumber.options>
+            </properties>
+
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <version>2.18.1</version>
+                        <configuration>
+                            <systemPropertyVariables>
+                                <cucumber.options>${cucumber.options}</cucumber.options>
+                            </systemPropertyVariables>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+
+
+    <scm>
+        <connection>scm:git:${stash.http.url}/LENDING/${project.artifactId}.git</connection>
+        <url>scm:git:${stash.http.url}/LENDING/${project.artifactId}.git</url>
+        <developerConnection>scm:git:${stash.ssh.url}/LENDING/${project.artifactId}.git</developerConnection>
+        <tag>HEAD</tag>
+    </scm>
+</project>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
