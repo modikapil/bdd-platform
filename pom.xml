@@ -10,7 +10,7 @@
     <properties>
         <jdk.version>1.8</jdk.version>
         <cucumber.version>1.2.5</cucumber.version>
-        <!--<lnd-camel-platform-common.version>0.0.20</lnd-camel-platform-common.version>-->
+        <lnd-camel-platform-common.version>0.0.1-SNAPSHOT</lnd-camel-platform-common.version>
     </properties>
 
     <dependencies>
@@ -39,11 +39,11 @@
             <artifactId>cucumber-java8</artifactId>
             <version>1.2.5</version>
         </dependency>
-        <!--<dependency>-->
-            <!--<groupId>com.rbs.lending</groupId>-->
-            <!--<artifactId>lnd-camel-platform</artifactId>-->
-            <!--<version>${lnd-camel-platform-common.version}</version>-->
-        <!--</dependency>-->
+        <dependency>
+            <groupId>com.camel.platform</groupId>
+            <artifactId>camel-platform</artifactId>
+            <version>${lnd-camel-platform-common.version}</version>
+        </dependency>
         <dependency>
             <groupId>info.cukes</groupId>
             <artifactId>cucumber-spring</artifactId>

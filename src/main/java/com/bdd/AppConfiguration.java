@@ -1,9 +1,7 @@
 package com.bdd;
 
-import com.rbs.mybank.digital.platform.common.model.cookie.marshaller.CookieMarshaller;
-import com.rbs.mybank.digital.platform.common.model.cookie.marshaller.CustomerCookieMarshaller;
-import com.rbsgrp.camel.platform.restclient.RestTemplateFactory;
-import com.rbsgrp.camel.platform.restclient.RestTemplateFactoryConfig;
+import com.camel.platform.restclient.RestTemplateFactory;
+import com.camel.platform.restclient.RestTemplateFactoryConfig;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
@@ -45,9 +43,9 @@ public abstract class AppConfiguration {
 
         }
 
-        @Bean(name = {"cookieMarshaller"})
-        public CookieMarshaller customerCookieMarshaller() {
-            return new CustomerCookieMarshaller();
-        }
+//        @Bean(name = {"cookieMarshaller"})
+//        public CookieMarshaller customerCookieMarshaller() {
+//            return new CustomerCookieMarshaller();
+//        }
     }
 }
